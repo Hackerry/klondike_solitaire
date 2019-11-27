@@ -2,13 +2,14 @@ import java.util.*;
 
 public class GameDeck {
     static final int SPADE = 0, CLUB = 1, HEART = 2, DIAMOND = 3;
+    static final String[] SUIT_SYMBOL = {"\u2660","\u2665","\u2663","\u2666"};
     static final String[] FACE = {"A","2","3","4","5","6","7","8","9","10","J","Q","K"};
     static final int DECK_COUNT = 52, TABLEAU_COUNT = 7, FOUNDATION_COUNT = 4, TALON_COUNT = 3;
     static final int SHUFFLE_COUNT = DECK_COUNT*2, BLACK = 2;
 
-    private ArrayList<ArrayList<Card>> tableau;
-    private ArrayList<Stack<Card>> foundation;
-    private LinkedList<Card> stock;
+    protected ArrayList<ArrayList<Card>> tableau;
+    protected ArrayList<Stack<Card>> foundation;
+    protected LinkedList<Card> stock;
 
     public GameDeck() {
         // Initialize tableau
@@ -35,7 +36,9 @@ public class GameDeck {
 
         // The rest to stock
         stock = new LinkedList<>(deck.subList(index, deck.size()));
-        printTableau();printStock();
+        
+        // Debug
+        // printTableau();printStock();
     }
 
     private ArrayList<Card> randomDeck() {
@@ -70,18 +73,20 @@ public class GameDeck {
     private void printStock() {
         System.out.println(stock);
     }
+}
 
-    class Card {
-        private int suit;
-        private String face;
-    
-        public Card(int suit, int face) {
-            this.suit = suit;
-            this.face = FACE[face];
-        }
+class Card {
+    protected int suit;
+    protected String face;
+    protected boolean isBlack;
 
-        public String toString() {
-            return "[" + suit + face + "]";
-        }
+    public Card(int suit, int face) {
+        this.suit = suit;
+        this.face = GameDeck.FACE[face];
+        this.isBlack = suit < GameDeck.BLACK;
+    }
+
+    public String toString() {
+        return "[" + GameDeck.SUIT_SYMBOL[suit] + " " + face + "]";
     }
 }
