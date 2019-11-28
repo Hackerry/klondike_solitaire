@@ -2,7 +2,8 @@ import java.util.*;
 
 public class GameLogic {
     static final int TALON_COUNT = 3;
-    static final char EMPTY = '*', EXIT = 'q', TALON = 'n', STOCK = 's', FOUNDATION = 'f', TABLEAU = 't';
+    static final char EXIT = 'q', TALON = 'n', STOCK = 's', FOUNDATION = 'f', TABLEAU = 't';
+    static final String BACK = "*-*";
 
     private GameDeck deck;
     private ListIterator<Card> talonPointer;
@@ -18,8 +19,14 @@ public class GameLogic {
         remainStockSize = deck.stock.size();
         remainTalonSize = 0;
 
-        // Debug
-        updateTalon();
+        // Flip the last card of each pile
+        for(int i = 0; i < GameDeck.TABLEAU_COUNT; i++) {
+            ArrayList<Card> currPile = deck.tableau.get(i);
+            currPile.get(currPile.size()-1).isShown = true;
+        }
+
+        // Flip all cards in stock
+        for(Card c: deck.stock) c.isShown = true;
 
         // User input
         try {
@@ -54,36 +61,140 @@ public class GameLogic {
         // Talon is empty
         if(remainTalonSize == 0) return;
 
-        // Remove from talon
-        Card moveCard = talon[--remainTalonSize];
-        talon[remainTalonSize] = null;
-        talonPointer.remove();
+        System.out.println("Move talon to " + slot + " of " + (foundation? "foundation" : "tableau"));
 
-        // Set talon pointer properly for the next remove
-        if(talonPointer.hasPrevious()) {
-            talonPointer.previous();
-            talonPointer.next();
+        // Check valid move
+        boolean success = false;
+        Card moveCard = talon[remainTalonSize-1];
+        if(foundation) {
+            Stack<Card> currSuit = deck.foundation.get(moveCard.suit);
+            if(currSuit.isEmpty()) {
+                if(moveCard.face == GameDeck.ACE) success = true;
+            } else if(currSuit.peek().face+1 == moveCard.face) {
+                success = true;
+            }
+            if(success) currSuit.push(moveCard);
+        } else {
+            // Move to tableau
+            ArrayList<Card> currPile = deck.tableau.get(slot);
+            if(currPile.isEmpty()) {
+                if(moveCard.face == GameDeck.KING) success = true;
+            } else {
+                Card last = currPile.get(currPile.size()-1);
+                if((last.isBlack ^ moveCard.isBlack) && (last.face == moveCard.face+1))
+                    success = true;
+                System.out.println("Last: " + last + last.face + " MoveCard: " + moveCard + moveCard.face);
+                System.out.println("Cross: " + (last.isBlack ^ moveCard.isBlack));
+            }
+            if(success) currPile.add(moveCard);
+            System.out.println("Success " + success + " " + currPile);
         }
 
-        // TODO Move to specified location
-        if(foundation) {
-            // Check correct suit
-            if(slot != moveCard.suit) {
-                System.out.println("Wrong suit to foundation.");
-            }
-        } else {
+        // Successful move
+        if(success) {
+            talon[--remainTalonSize] = null;
+            talonPointer.remove();
 
+            // Set talon pointer properly for the next remove
+            if(talonPointer.hasPrevious()) {
+                talonPointer.previous();
+                talonPointer.next();
+            }
         }
     }
 
     private void moveFoundation(int fromSlot, int toSlot) {
+        System.out.println("Move foundation " + fromSlot + " to " + toSlot + " of tableau");
 
+        Stack<Card> currSuit = deck.foundation.get(fromSlot);
+        ArrayList<Card> currPile = deck.tableau.get(toSlot);
+        boolean success = false;
+
+        if(!currSuit.isEmpty()) {
+            Card moveCard = currSuit.peek();
+            if(currPile.isEmpty()) {
+                if(moveCard.face == GameDeck.KING) success = true;
+            } else {
+                Card lastCard = currPile.get(currPile.size()-1);
+                if((lastCard.isBlack ^ moveCard.isBlack) && (lastCard.face == moveCard.face+1)) success = true;
+            }
+
+            if(success) {
+                currSuit.pop();
+                currPile.add(moveCard);
+            }
+        }
     }
 
     private void moveTableau(int fromSlot, int toSlot, int startNum, boolean foundation) {
-        // -1 for last number only
-        // number to start till end of pile
-        // Test is startNum exists in the given tableau and whether is it possible to move
+        System.out.println("Move tableau " + fromSlot + " to " + toSlot + " of " + (foundation? "foundation" : "tableau") + " starting from " + startNum);
+
+        ArrayList<Card> currPile = deck.tableau.get(fromSlot);
+        // Empty pile
+        if(currPile.isEmpty()) return;
+
+        boolean success = false;
+        if(foundation) {
+            // Move to foundation
+            Card moveCard = currPile.get(currPile.size()-1);
+            Stack<Card> currSuit = deck.foundation.get(moveCard.suit);
+            if(currSuit.isEmpty()) {
+                if(moveCard.face == GameDeck.ACE) success = true;
+            } else if(currSuit.peek().face+1 == moveCard.face) {
+                success = true;
+            }
+
+            if(success) {
+                currSuit.push(moveCard);
+                currPile.remove(currPile.size()-1);
+            }
+        } else {
+            // Move to other tableau
+            int index = -1;
+            Card moveCard = null;
+
+            if(startNum == -1) {
+                // Default to the last card
+                index = currPile.size()-1;
+                moveCard = currPile.get(index);
+            } else {
+                for(int i = 0; i < currPile.size(); i++) {
+                    moveCard = currPile.get(i);
+                    if(moveCard.isShown && startNum == moveCard.face) {
+                        index = i;
+                        break;
+                    }
+                }
+            }
+
+            System.out.println("Found card at " + index + ", " + moveCard + moveCard.face);
+
+            // Valid card input
+            if(index != -1) {
+                ArrayList<Card> toPile = deck.tableau.get(toSlot);
+                if(toPile.isEmpty()) {
+                    if(moveCard.face == GameDeck.KING) success = true;
+                } else {
+                    Card lastCard = toPile.get(toPile.size()-1);
+                    if((lastCard.isBlack ^ moveCard.isBlack) && (lastCard.face == moveCard.face+1)) success = true;
+                }
+
+                System.out.println("Success " + success);
+
+                if(success) {
+                    // Move all cards starting from index to destination pile
+                    List<Card> transferCards = currPile.subList(index, currPile.size());
+                    toPile.addAll(transferCards);
+                    currPile.removeAll(transferCards);
+                }
+            }
+        }
+
+        // Potentially flip a new card
+        if(success) {
+            if(!currPile.isEmpty())
+                currPile.get(currPile.size()-1).isShown = true;
+        }
     }
 
     private void initInput() throws Exception {
@@ -97,6 +208,7 @@ public class GameLogic {
             printBoard();
 
             // Ask for user input
+            if(input.equals("")) continue;
             input = sc.nextLine();
             parts = input.split(" ");
 
@@ -110,13 +222,7 @@ public class GameLogic {
 
                 if(Character.toLowerCase(parts[1].charAt(0)) == FOUNDATION) {
                     // Talon to foundation
-                    toSlot = getSlot(parts[1].substring(1));
-
-                    if(toSlot < 0 || toSlot >= GameDeck.FOUNDATION_COUNT) {
-                        System.out.println("Wrong slot number [0-3].");
-                    } else {
-                        moveTalon(toSlot, true);
-                    }
+                    moveTalon(-1, true);
                 } else if(Character.toLowerCase(parts[1].charAt(0)) == TABLEAU) {
                     // Talon to tableau
                     toSlot = getSlot(parts[1].substring(1));
@@ -170,7 +276,6 @@ public class GameLogic {
 
                 // Find destination
                 toSlot = getSlot(parts[1].substring(1));
-                if(toSlot == -1) continue;
                 if(Character.toLowerCase(parts[1].charAt(0)) == TABLEAU) {
                     if(toSlot < 0 || toSlot >= GameDeck.TABLEAU_COUNT) {
                         System.out.println("Wrong slot number [0-6].");
@@ -186,20 +291,16 @@ public class GameLogic {
                     } else {
                         moveTableau(fromSlot, toSlot, -1, false);
                     }
-                } else if(Character.toLowerCase(parts[0].charAt(0)) == FOUNDATION) {
-                    if(toSlot < 0 || toSlot >= GameDeck.FOUNDATION_COUNT) {
-                        System.out.println("Wrong slot number [0-3].");
-                        continue;
-                    }
-
+                } else if(Character.toLowerCase(parts[1].charAt(0)) == FOUNDATION) {
                     moveTableau(fromSlot, toSlot, -1, true);
-
                 } else {
                     System.out.println("Illegal destination.");
                 }
             } else if(Character.toLowerCase(parts[0].charAt(0)) == STOCK) {
                 // Stock to talon
                 updateTalon();
+            } else if(Character.toLowerCase(input.charAt(0)) != 'q') {
+                System.out.println("Unrecognized command.");
             }
         }
 
@@ -235,10 +336,16 @@ public class GameLogic {
         System.out.println(remainStockSize);
 
         // Print Tableau
-        for(ArrayList<Card> a: deck.tableau) System.out.println(a);
+        for(int i = 0; i < deck.tableau.size(); i++) {
+            System.out.print(i + ": ");
+
+            for(Card c: deck.tableau.get(i))
+                System.out.print(c.isShown? c: "[" + BACK + "]");
+            System.out.println();
+        }
 
         // Debug print stock
-        System.out.println(deck.stock);
+        // System.out.println(deck.stock);
     }
 
     public static void main(String[] args) {
