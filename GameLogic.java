@@ -1,17 +1,46 @@
 import java.util.*;
+import java.io.*;
 
 public class GameLogic {
     static final int TALON_COUNT = 3;
-    static final char EXIT = 'q', TALON = 'n', STOCK = 's', FOUNDATION = 'f', TABLEAU = 't';
-    static final String BACK = "*-*";
+    static final char EXIT = 'q', TALON = 'n', STOCK = 's', FOUNDATION = 'f', TABLEAU = 't', AUTO = 'a', HINT = 'h', SOLVE = '~';
+    static final String BACK = "*-*", MOVE_FILE = "moves";
+    static final String HINT_STR = "Move card %s from %s to %s";
 
     private GameDeck deck;
     private ListIterator<Card> talonPointer;
     private int remainStockSize, remainTalonSize;
     private Card[] talon;
+    private String deckString;
+    private boolean solveMode = false;
+    // Solver variable
+    private boolean pulled = false;
+    private int upperLimit, counter;
+    private String input = "?";
 
-    public GameLogic() {
-        deck = new GameDeck();
+    public GameLogic(String inputFile, String outputFile) {
+        String input = null;
+
+        // Read potential input file
+        if(inputFile != null && !inputFile.equals("")) {
+            try {
+                File inFile = new File(inputFile);
+
+                if(inFile.exists() && inFile.isFile() && inFile.canRead()) {
+                    BufferedReader reader = new BufferedReader(new FileReader(inFile));
+                    StringBuffer buff = new StringBuffer();
+                    String nextLine;
+                    while((nextLine = reader.readLine()) != null) buff.append(nextLine);
+                    reader.close();
+
+                    input = buff.toString();
+                    System.out.println("Successful read from file " + inFile.getName());
+                }
+            } catch(IOException ex) {
+                System.out.println("Can't read file.");
+            }
+        }
+        deck = new GameDeck(input);
 
         // Initialize board
         talon = new Card[TALON_COUNT];
@@ -28,10 +57,31 @@ public class GameLogic {
         // Flip all cards in stock
         for(Card c: deck.stock) c.isShown = true;
 
+        // Store deck string before modify
+        if(input == null) deckString = deck.getDeckString();
+
         // User input
         try {
             initInput();
         } catch(Exception ex) {ex.printStackTrace();}
+
+        // If card is randomly generated, print last played deck
+        if(input == null) {
+            if(outputFile != null) {
+                try {
+                    File outFile = new File(outputFile);
+                    if(!outFile.exists()) outFile.createNewFile();
+                    PrintWriter pw = new PrintWriter(outFile);
+                    pw.print(deckString);
+                    pw.close();
+                } catch(IOException ex) {
+                    System.out.println("Can't open or write to file.");
+                }
+            } else {
+                System.out.println("The deck you just played: ");
+                System.out.println(deckString);
+            }
+        }
     }
 
     private void updateTalon() {
@@ -57,11 +107,186 @@ public class GameLogic {
         }
     }
 
+    /**
+     * Contain last card from talon
+     */
+    private Card[] getLastCards() {
+        Card[] possibleCards = new Card[GameDeck.TABLEAU_COUNT+1];
+        // Get cards from tableau
+        for(int i = 0; i < GameDeck.TABLEAU_COUNT; i++) {
+            ArrayList<Card> pile = deck.tableau.get(i);
+            if(!pile.isEmpty()) {
+                possibleCards[i] = pile.get(pile.size()-1);
+            }
+        }
+        // Get cards from talon
+        if(remainTalonSize != 0 && talonPointer.hasPrevious()) {
+            possibleCards[possibleCards.length-1] = talonPointer.previous();
+            talonPointer.next();
+        }
+
+        return possibleCards;
+    }
+
+    private void autoMove() {
+        // Get all possible cards
+        Card[] possibleCards = getLastCards();
+
+        int movedIdx;
+        do {
+            movedIdx = -1;
+            for(int i = 0; i < possibleCards.length; i++) {
+                Card c = possibleCards[i];
+                if(c == null) continue;
+                if(deck.foundation.get(c.suit).isEmpty()) {
+                    if(c.face == GameDeck.ACE) {
+                        if(i != possibleCards.length-1) moveTableau(i, c.suit, -1, true);
+                        else moveTalon(c.suit, true);
+                        movedIdx = i;
+                        break;
+                    }
+                } else {
+                    if(c.face == deck.foundation.get(c.suit).peek().face+1) {
+                        if(i != possibleCards.length-1) moveTableau(i, c.suit, -1, true);
+                        else moveTalon(c.suit, true);
+                        movedIdx = i;
+                        break;
+                    }
+                }
+            }
+
+            // Update moved card
+            if(movedIdx != -1) {
+                if(movedIdx != possibleCards.length-1) {
+                    ArrayList<Card> pile = deck.tableau.get(movedIdx);
+                    if(!pile.isEmpty()) possibleCards[movedIdx] = pile.get(pile.size()-1);
+                } else {
+                    if(remainTalonSize != 0 && talonPointer.hasPrevious()) {
+                        possibleCards[possibleCards.length-1] = talonPointer.previous();
+                        talonPointer.next();
+                    }
+                }
+            }
+        } while(movedIdx != -1);
+    }
+
+    private String giveHint() {
+        Card[] lastCards = getLastCards();
+        ArrayList<Card> pile;
+        int lastFace;
+        boolean goodMove, lastSuit;
+
+        // N-square find all possible card moves (exclude unmeaningful swaps unless it can improve situation)
+        for(int i = GameDeck.TABLEAU_COUNT-1; i >= 0; i--) {
+            pile = deck.tableau.get(i);
+
+            // Find possible straights within a pile
+            lastFace = -1; lastSuit = true;
+            for(int j = pile.size()-1; j >= 0; j--) {
+                Card curr = pile.get(j);
+
+                // Test valid straight and whether it's flipped or not
+                if((lastFace != -1 && (lastSuit & curr.isBlack || lastFace+1 != curr.face)) || !curr.isShown) break;
+
+                goodMove = false;
+                // Empty a pile, always good, but not in the case of K (move between empty piles)
+                if(j-1 < 0) {
+                    if(curr.face != GameDeck.KING) goodMove = true;
+                } else {
+                    Card last = pile.get(j-1);
+                    // Can flip another card
+                    if(!last.isShown) goodMove = true;
+                    // Card before can be moved to foundation
+                    else {
+                        if(deck.foundation.get(last.suit).isEmpty()) {
+                            if(last.face == GameDeck.ACE) goodMove = true;
+                        } else {
+                            if(deck.foundation.get(last.suit).peek().face+1 == last.face) goodMove = true;
+                        }
+                    }
+                }
+
+                // Last card move to foundation, always good
+                if(lastFace == -1) {
+                    if(deck.foundation.get(curr.suit).isEmpty()) {
+                        if(curr.face == GameDeck.ACE) {
+                            System.out.println("Move " + GameDeck.FACE[curr.face] + " to foundation");
+                            return "t" + i + " f";
+                        }
+                    } else {
+                        if(deck.foundation.get(curr.suit).peek().face+1 == curr.face) {
+                            System.out.println("Move " + GameDeck.FACE[curr.face] + " to foundation");
+                            return "t" + i + " f";
+                        }
+                    }
+                }
+
+                if(goodMove) {
+                    // If it's a good move, test validity
+                    for(int k = 0; k < GameDeck.TABLEAU_COUNT; k++) {
+                        // Same pile
+                        if(k == i) continue;
+
+                        // If current card is K, only empty piles are possible
+                        if(curr.face == GameDeck.KING) {
+                            if(lastCards[k] == null) {
+                                System.out.println("Move " + GameDeck.FACE[curr.face] + " from pile " + i + " to pile " + k);
+                                return "t" + i + " t" + k + " " + GameDeck.FACE[curr.face];
+                            }
+                        } else if(lastCards[k] != null && lastCards[k].isBlack ^ curr.isBlack && curr.face+1 == lastCards[k].face) {
+                            System.out.println("Move " + GameDeck.FACE[curr.face] + " from pile " + i + " to pile " + k);
+                            return "t" + i + " t" + k + " " + GameDeck.FACE[curr.face];
+                        }
+                    }
+                }
+
+                // Assign last face and last suit
+                lastFace = curr.face;
+                lastSuit = curr.isBlack;
+            }
+        }
+
+        if(remainTalonSize != 0) {
+            // Last card from talon
+            // Always good to move talon to anywhere (reveal the next card)
+            // To foundation
+            Card talonLast = lastCards[lastCards.length-1];
+            if(deck.foundation.get(talonLast.suit).isEmpty()) {
+                if(talonLast.face == GameDeck.ACE) {
+                    System.out.println("Move " + GameDeck.FACE[talonLast.face] + "(talon) to foundation");
+                    return "n f";
+                }
+            } else {
+                if(deck.foundation.get(talonLast.suit).peek().face+1 == talonLast.face) {
+                    System.out.println("Move " + GameDeck.FACE[talonLast.face] + "(talon) to foundation");
+                    return "n f";
+                }
+            }
+
+            // To tableau
+            for(int k = 0; k < GameDeck.TABLEAU_COUNT; k++) {
+                // A king
+                if(talonLast.face == GameDeck.KING) {
+                    if(lastCards[k] == null) {
+                        System.out.println("Move " + GameDeck.FACE[talonLast.face] + "(talon) to pile " + k);
+                        return "n t" + k;
+                    }
+                } else if(lastCards[k] != null && lastCards[k].isBlack ^ talonLast.isBlack && talonLast.face+1 == lastCards[k].face) {
+                    System.out.println("Move " + GameDeck.FACE[talonLast.face] + "(talon) to pile " + k);
+                    return "n t" + k;
+                }
+            }
+        }
+
+        System.out.println("No hints found");
+        return null;
+    }
+
     private void moveTalon(int slot, boolean foundation) {
         // Talon is empty
         if(remainTalonSize == 0) return;
 
-        System.out.println("Move talon to " + slot + " of " + (foundation? "foundation" : "tableau"));
+        // System.out.println("Move talon to " + slot + " of " + (foundation? "foundation" : "tableau"));
 
         // Check valid move
         boolean success = false;
@@ -73,7 +298,10 @@ public class GameLogic {
             } else if(currSuit.peek().face+1 == moveCard.face) {
                 success = true;
             }
-            if(success) currSuit.push(moveCard);
+            if(success) {
+                currSuit.push(moveCard);
+                checkWin();
+            }
         } else {
             // Move to tableau
             ArrayList<Card> currPile = deck.tableau.get(slot);
@@ -83,11 +311,8 @@ public class GameLogic {
                 Card last = currPile.get(currPile.size()-1);
                 if((last.isBlack ^ moveCard.isBlack) && (last.face == moveCard.face+1))
                     success = true;
-                System.out.println("Last: " + last + last.face + " MoveCard: " + moveCard + moveCard.face);
-                System.out.println("Cross: " + (last.isBlack ^ moveCard.isBlack));
             }
             if(success) currPile.add(moveCard);
-            System.out.println("Success " + success + " " + currPile);
         }
 
         // Successful move
@@ -104,7 +329,7 @@ public class GameLogic {
     }
 
     private void moveFoundation(int fromSlot, int toSlot) {
-        System.out.println("Move foundation " + fromSlot + " to " + toSlot + " of tableau");
+        // System.out.println("Move foundation " + fromSlot + " to " + toSlot + " of tableau");
 
         Stack<Card> currSuit = deck.foundation.get(fromSlot);
         ArrayList<Card> currPile = deck.tableau.get(toSlot);
@@ -127,7 +352,7 @@ public class GameLogic {
     }
 
     private void moveTableau(int fromSlot, int toSlot, int startNum, boolean foundation) {
-        System.out.println("Move tableau " + fromSlot + " to " + toSlot + " of " + (foundation? "foundation" : "tableau") + " starting from " + startNum);
+        // System.out.println("Move tableau " + fromSlot + " to " + toSlot + " of " + (foundation? "foundation" : "tableau") + " starting from " + startNum);
 
         ArrayList<Card> currPile = deck.tableau.get(fromSlot);
         // Empty pile
@@ -147,6 +372,7 @@ public class GameLogic {
             if(success) {
                 currSuit.push(moveCard);
                 currPile.remove(currPile.size()-1);
+                checkWin();
             }
         } else {
             // Move to other tableau
@@ -160,14 +386,12 @@ public class GameLogic {
             } else {
                 for(int i = 0; i < currPile.size(); i++) {
                     moveCard = currPile.get(i);
-                    if(moveCard.isShown && startNum == moveCard.face) {
+                    if(moveCard.isShown && startNum-1 == moveCard.face) {
                         index = i;
                         break;
                     }
                 }
             }
-
-            System.out.println("Found card at " + index + ", " + moveCard + moveCard.face);
 
             // Valid card input
             if(index != -1) {
@@ -178,8 +402,6 @@ public class GameLogic {
                     Card lastCard = toPile.get(toPile.size()-1);
                     if((lastCard.isBlack ^ moveCard.isBlack) && (lastCard.face == moveCard.face+1)) success = true;
                 }
-
-                System.out.println("Success " + success);
 
                 if(success) {
                     // Move all cards starting from index to destination pile
@@ -197,20 +419,85 @@ public class GameLogic {
         }
     }
 
+    private boolean checkWin() {
+        for(Stack<Card> suit: deck.foundation) {
+            if(suit.isEmpty() || suit.peek().face != GameDeck.KING) return false;
+        }
+
+        printBoard();
+        System.out.println("You win!!!");
+        // Terminate loop
+        input = "q";
+
+        if(solveMode) System.out.println("O_O!");
+        return true;
+    }
+
     private void initInput() throws Exception {
         Scanner sc = new Scanner(System.in);
 
-        String input = "h";
         String[] parts;
         int fromSlot, toSlot, startNum;
-        while(input.charAt(0) != EXIT) {
+        do {
             // Print board
+            System.out.println();
             printBoard();
 
-            // Ask for user input
-            if(input.equals("")) continue;
-            input = sc.nextLine();
+            // Input taken over by solver
+            if(solveMode) {
+                String nextMove = giveHint();
+
+                // No hints available
+                if(nextMove == null) {
+                    // Finished examining stock
+                    if(remainStockSize == 0) {
+                        if(pulled) {
+                            // Have drawn some cards from talon, continue
+                            upperLimit = remainStockSize/3+2;
+                            counter = 1;
+                            pulled = false;
+                            input = "s";
+                        } else {
+                            // Else solver gets stuck
+                            System.out.println("x_x");
+                            solveMode = false;
+                            return;
+                        }
+                    } else {
+                        // Keep examing stock
+                        counter++;
+                        input = "s";
+                    }
+                } else {
+                    // Execute next hint
+                    input = nextMove;
+                    if(nextMove.charAt(0) == TALON) pulled = true;
+                    System.err.println(nextMove);
+                }
+
+                // Easier to see output
+                try {
+                    Thread.sleep(1000);
+                } catch(Exception ex) {break;}
+            } else {
+                // Input taken over by user
+                input = sc.nextLine().trim();
+            }
+
             parts = input.split(" ");
+
+            // Mistyped commands
+            if(input.equals("") || parts.length == 0) {
+                input = "?";
+                continue;
+            }
+
+            for(String s: parts) {
+                if(s.length() == 0) {
+                    input = "?";
+                    continue;
+                }
+            }
 
             // Check input format
             if(Character.toLowerCase(parts[0].charAt(0)) == TALON) {
@@ -285,8 +572,18 @@ public class GameLogic {
                     // Test is there a third arguement
                     if(parts.length >= 3) {
                         startNum = getSlot(parts[2]);
-                        if(fromSlot != -1) {
+                        if(startNum != -1) {
                             moveTableau(fromSlot, toSlot, startNum, false);
+                        } else if(Character.toLowerCase(parts[2].charAt(0)) == 'j') {
+                            moveTableau(fromSlot, toSlot, GameDeck.JACK+1, false);
+                        } else if(Character.toLowerCase(parts[2].charAt(0)) == 'q') {
+                            moveTableau(fromSlot, toSlot, GameDeck.QUEEN+1, false);
+                        } else if(Character.toLowerCase(parts[2].charAt(0)) == 'k') {
+                            moveTableau(fromSlot, toSlot, GameDeck.KING+1, false);
+                        } else if(Character.toLowerCase(parts[2].charAt(0)) == 'a') {
+                            moveTableau(fromSlot, toSlot, GameDeck.ACE+1, false);
+                        } else if(Character.toLowerCase(parts[2].charAt(0)) == 'x') {
+                            moveTableau(fromSlot, toSlot, GameDeck.TEN+1, false);
                         }
                     } else {
                         moveTableau(fromSlot, toSlot, -1, false);
@@ -299,10 +596,23 @@ public class GameLogic {
             } else if(Character.toLowerCase(parts[0].charAt(0)) == STOCK) {
                 // Stock to talon
                 updateTalon();
+            } else if(Character.toLowerCase(parts[0].charAt(0)) == AUTO) {
+                // Move cards from tableau to foundation automatically
+                autoMove();
+            } else if(Character.toLowerCase(parts[0].charAt(0)) == HINT) {
+                // Give hint
+                giveHint();
+            } else if(Character.toLowerCase(parts[0].charAt(0)) == SOLVE) {
+                // Use hint to solve
+                solveMode = true;
+                upperLimit = remainStockSize/3+2;
+                counter = 0;
+                pulled = false;
+                System.out.println("Solve mode on");
             } else if(Character.toLowerCase(input.charAt(0)) != 'q') {
                 System.out.println("Unrecognized command.");
             }
-        }
+        } while(input.charAt(0) != EXIT);
 
         sc.close();
     }
@@ -349,6 +659,10 @@ public class GameLogic {
     }
 
     public static void main(String[] args) {
-        new GameLogic();
+        String file = null;
+        if(args.length >= 1) {
+            if(args.length >= 2) file = args[1];
+            new GameLogic(args[0], file);
+        } else new GameLogic(null, file);
     }
 }
