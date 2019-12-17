@@ -3,7 +3,7 @@ import java.io.*;
 
 public class GameLogic {
     static final int TALON_COUNT = 3;
-    static final char EXIT = 'q', TALON = 'n', STOCK = 's', FOUNDATION = 'f', TABLEAU = 't', AUTO = 'a', HINT = 'h', SOLVE = '~';
+    static final char EXIT = 'q', TALON = 'n', STOCK = 's', FOUNDATION = 'f', TABLEAU = 't', AUTO = 'a', HINT = 'h', SOLVE = '~', INSPECT = 'i';
     static final String BACK = "*-*", MOVE_FILE = "moves";
     static final String HINT_STR = "Move card %s from %s to %s";
 
@@ -602,6 +602,14 @@ public class GameLogic {
             } else if(Character.toLowerCase(parts[0].charAt(0)) == HINT) {
                 // Give hint
                 giveHint();
+            }  else if(Character.toLowerCase(parts[0].charAt(0)) == INSPECT) {
+                // Inspect the deck, show all cards
+                for(ArrayList<Card> v: deck.tableau) {
+                    for(Card c: v) System.out.print(c);
+                    System.out.println();
+                }
+                for(Card c: deck.stock) System.out.print(c);
+                System.out.println();
             } else if(Character.toLowerCase(parts[0].charAt(0)) == SOLVE) {
                 // Use hint to solve
                 solveMode = true;
