@@ -15,7 +15,6 @@ public class GameLogic {
     private boolean solveMode = false;
     // Solver variable
     private boolean pulled = false;
-    private int upperLimit, counter;
     private String input = "?";
 
     public GameLogic(String inputFile, String outputFile) {
@@ -453,8 +452,6 @@ public class GameLogic {
                     if(remainStockSize == 0) {
                         if(pulled) {
                             // Have drawn some cards from talon, continue
-                            upperLimit = remainStockSize/3+2;
-                            counter = 1;
                             pulled = false;
                             input = "s";
                         } else {
@@ -465,7 +462,6 @@ public class GameLogic {
                         }
                     } else {
                         // Keep examing stock
-                        counter++;
                         input = "s";
                     }
                 } else {
@@ -613,8 +609,6 @@ public class GameLogic {
             } else if(Character.toLowerCase(parts[0].charAt(0)) == SOLVE) {
                 // Use hint to solve
                 solveMode = true;
-                upperLimit = remainStockSize/3+2;
-                counter = 0;
                 pulled = false;
                 System.out.println("Solve mode on");
             } else if(Character.toLowerCase(input.charAt(0)) != 'q') {
